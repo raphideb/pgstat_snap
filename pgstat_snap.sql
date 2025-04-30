@@ -8,12 +8,15 @@ REQUIREMENTS
 pg_stat_statements must be loaded and tracking activated in the postgres config:
 shared_preload_libraries = 'pg_stat_statements'
 
+And the extension must be available in your database:
+create extension pg_stat_statements;
+
 Recommended settings:
 pg_stat_statements.track = all
 pg_stat_statements.track_utility = off
 
 INSTALLATION
-It is recommended to install the script in the postgres database:
+Install the script in the postgres database or in any database that has the pg_stat_statement extension created.
 
 psql
 \i /path/to/pgstat_snap.sql
