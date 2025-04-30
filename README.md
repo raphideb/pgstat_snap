@@ -6,7 +6,7 @@ But it gets more tricky when the culprit is a different database running in the 
 That's why I created pgstat_snap. It gives DBA or developers the ability to create timestamped snapshots of pg_stat_statement and pg_stat_activity when it's needed. It also provides views where one can see the difference of the execution statistics between every snapshot taken. No more guessing how many rows were updated or how many blocks were written at a particular point in time by a particular query. It is by no means perfect but it is better than flying blind ;)
 
 # Requirements
-pg_stat_statements must be loaded and tracking activated in the postgres config:
+pg_stat_statements must be loaded and tracking activated in the postgres config:  
 shared_preload_libraries = 'pg_stat_statements'
 
 And the extension has to be created:
