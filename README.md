@@ -9,6 +9,10 @@ That's why I created pgstat_snap. It gives DBA or developers the ability to crea
 pg_stat_statements must be loaded and tracking activated in the postgres config:
 shared_preload_libraries = 'pg_stat_statements'
 
+And the extension has to be created:
+```
+create extension pg_stat_statements;
+```
 Recommended settings:  
 ```
 pg_stat_statements.track = all  
