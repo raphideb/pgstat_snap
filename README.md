@@ -1,17 +1,12 @@
 # Purpose of this script
-PostgreSQL databases are usually low maintenance and I as a DBA am rarely asked to investigate a performance issue. But when the dreaded call "my db is suddenly slow, please help" comes, I often feel powerless. With luck I can see "something" in Grafana that might explain the sudden performance drop or the query was running long enough to be logged to your postgresql.log. 
+The cumulative statistics system (CSS) in PostgreSQL and pg_stat_statements in particular lack any timing information, all values are cumulative and the only way to figure out the difference between query executions is to reset the stats every time or work with averages. 
 
-But it gets more tricky when the culprit is a different database running in the same cluster that negatively impacts the other databases. We only have pg_stat_statements and pg_stat_activity to investigate but the former is cumulative and the latter is an in-the-moment view, both without history or timestamps. We looked into pg_profile but as said, we have (fortunately) too few performance problems to warrant setting up the whole infrastructure needed for gathering stats of all our databases.
-
-That's why I created pgstat_snap. It gives DBA or developers the ability to create timestamped snapshots of pg_stat_statement and pg_stat_activity when it's needed. It also provides views where one can see the difference of the execution statistics between every snapshot taken. No more guessing how many rows were updated or how many blocks were written at a particular point in time by a particular query. It is by no means perfect but it is better than flying blind ;)
+With the pgstat_snap extension, you can create timestamped snapshots of pg_stat_statements and pg_stat_activity when needed. It also provides views that show the difference between every snapshot for every query and database. 
 
 # Requirements
 pg_stat_statements must be loaded and tracking activated in the postgres config:  
-shared_preload_libraries = 'pg_stat_statements'
-
-And the extension has to be created:
 ```
-create extension pg_stat_statements;
+shared_preload_libraries = 'pg_stat_statements'
 ```
 Recommended settings:  
 ```
@@ -19,32 +14,49 @@ pg_stat_statements.track = all
 pg_stat_statements.track_utility = off
 ```
 
-# Installation
-Install the script in the postgres database or in any database that has the pg_stat_statement extension created:
-
+The extension has to be created in the database in which pgstat_snap will be installed:
 ```
-psql
-\i /path/to/pgstat_snap.sql
+create extension pg_stat_statements;
+```
+
+# Installation
+To install the extension, download these files:
+```
+pgstat_snap--1.0.sql
+pgstat_snap.control
+```
+
+And copy them to the extension directory of PostgreSQL
+```
+sudo cp pgstat_snap* $(pg_config --sharedir)/extension/
+```
+
+You can then install the extension in any database that has the pg_stat_statements extension enabled, superuser right are NOT needed:
+```
+create extension pgstat_snap;
+```
+
+It can also be installed into a different schema but be sure to have it included in the search_path:
+```
+create extension pgstat_snap schema my_schema;
 ```
 
 This will create the following tables and views:
 ```
-  pgstat_snap.pgstat_stat_history -> pg_stat_statements history (complete snapshot)
-  pgstat_snap.pgstat_act_history  -> pg_stat_activity history (complete snapshot)
-  pgstat_snap_diff_all            -> view containing the sum and difference of each statement execution
-  pgstat_snap_diff                -> view containing only the difference of each statement execution
+  pgstat_snap_stat_history   -> pg_stat_statements history (complete snapshot)
+  pgstat_snap_act_history    -> pg_stat_activity history (complete snapshot)
+  pgstat_snap_diff_all       -> view containing the sum and difference of each statement between snapshots
+  pgstat_snap_diff           -> view containing only the difference of each statement between snapshots
 ```
-
-**Note:** a new schema "pgstat_snap" will be created for the tables.  For conveniance, the views are created in the schema that installed pgstat_snap.
 
 # Usage
 Start gathering snapshots with, e.g. every 1 second 60 times:
 ```
-CALL pgstat_snap.create_snapshot(1, 60);
+CALL pgstat_snap_collect(1, 60);
 ```
 Or gather a snapshot every 5 seconds for 10 minutes:
 ```
-CALL pgstat_snap.create_snapshot(5, 120);
+CALL pgstat_snap_collect(5, 120);
 ```
 
 **IMPORTANT:** on very busy clusters with many databases a lot of data can be collected, 500mb per minute or more. Don't let it run for a very long time with short intervals, unless you have the disk space for it.
@@ -54,25 +66,24 @@ Because everything is timestamped, a reset is usually not needed between CALLs t
 
 Reset all pgstat_snap tables with:
 ```
-  SELECT pgstat_snap.reset();   -> reset only pgstat_snap.pgstat*history tables
-  SELECT pgstat_snap.reset(1);  -> also select pg_stat_statements_reset()
-  SELECT pgstat_snap.reset(2);  -> also select pg_stat_reset()
+  SELECT pgstat_snap_reset();   -> reset only pgstat_snap.pgstat*history tables
+  SELECT pgstat_snap_reset(1);  -> also select pg_stat_statements_reset()
+  SELECT pgstat_snap_reset(2);  -> also select pg_stat_reset()
 ```
 
 # How it works 
-The first argument to create_snapshot is the interval in seconds, the second argument is how many snapshots should be collected. Every *interval* seconds, *select * from pg_stat_statements* will be inserted into *pgstat_stat_history* and *select * from pgstat_act_statements* into *pgstat_act_history*. 
+The first argument to create_snapshot is the interval in seconds, the second argument is how many snapshots should be collected. Every *interval* seconds, *select * from pg_stat_statements* will be inserted into *pgstat_snap_stat_history* and *select * from pgstat_act_statements* into *pgstat_snap_act_history*. 
 
-For every row, a timestamp will be added. Only rows where the "rows" column has changed will be inserted into *pgstat_stat_history* and always only one row per timestamp, dbid and queryid. Every insert is immediately committed to be able to live follow the tables/views.
+For every row, a timestamp will be added. Only rows where the "rows" column has changed will be inserted into *pgstat_snap_stat_history* and always only one row per timestamp, dbid and queryid. Every insert is immediately committed to be able to live follow the tables/views.
 
-The views have a *_d* column which displays the difference between the current row and the last row where the query was recorded in the pgstat_stat_history table. *NULL* values in *rows_d*, *calls_d* and so on mean, that no previous row for this query was found because it was executed the first time since create_snapshot was running. 
+The views have a *_d* column which displays the difference between the current row and the last row where the query was recorded in the pgstat_snap_stat_history table. *NULL* values in *rows_d*, *calls_d* and so on mean, that no previous row for this query was found because it was executed the first time since create_snapshot was running. 
 
 The views also contain the datname, wait events and the first 20 characters of the query, making it easier to identify queries of interest.
 
 # Uninstall
 To completely uninstall pgstat_snap, run:
 ```
-SELECT pgstat_snap.uninstall();
-DROP SCHEMA pgstat_snap CASCADE;
+DROP EXTENSION pgstat_snap;
 ```
 
 # Views description
@@ -205,5 +216,5 @@ select * from pgstat_snap_diff where wait_event_type is not null and wait_event_
 
 If needed you can access all columns for a particular query directly in the history tables:
 ```
-select * from pgstat_snap.pgstat_stat_history where queryid='123455678909876';
+select * from pgstat_snap_stat_history where queryid='123455678909876';
 ```

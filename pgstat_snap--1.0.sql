@@ -1,5 +1,5 @@
 /* 
-pstat_snap.sql - extension to create snapshots of pg_stat_statements and pg_stat_activity
+pstat_snap - extension to create snapshots of pg_stat_statements and pg_stat_activity
 
 Author: Raphael Debinski (raphi@crashdump.ch)
 Version: 1.0
@@ -9,40 +9,37 @@ Version: 1.0
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pgstat_snap" to load this file. \quit
 
--- create pgstat_snap schema to hold everything in one place
-CREATE SCHEMA IF NOT EXISTS pgstat_snap;
-
 -- create the necessary tables and views
 DO $$
 BEGIN
-    -- Create pgstat_act_history table
-    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'pgstat_snap' AND tablename = 'pgstat_act_history') THEN
+    -- create pgstat_snap_act_history table
+    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = '@extschema@' AND tablename = 'pgstat_snap_act_history') THEN
         EXECUTE '
-            CREATE TABLE pgstat_snap.pgstat_act_history AS
+            CREATE TABLE @extschema@.pgstat_snap_act_history AS
                 SELECT localtimestamp(0) AS snapshot_time, * 
                 FROM pg_stat_activity 
                 WHERE 1=2;
-            ALTER TABLE pgstat_snap.pgstat_act_history ALTER COLUMN snapshot_time SET NOT NULL;
-            CREATE INDEX idx_pgstat_act_history_snapshot_time ON pgstat_snap.pgstat_act_history (snapshot_time);
+            ALTER TABLE @extschema@.pgstat_snap_act_history ALTER COLUMN snapshot_time SET NOT NULL;
+            CREATE INDEX idx_pgstat_act_history_snapshot_time ON @extschema@.pgstat_snap_act_history (snapshot_time);
         ';
     END IF;
 
-    -- Create pgstat_stat_history table
-    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'pgstat_snap' AND tablename = 'pgstat_stat_history') THEN
+    -- create pgstat_snap_stat_history table
+    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = '@extschema@' AND tablename = 'pgstat_snap_stat_history') THEN
         EXECUTE '
-            CREATE TABLE pgstat_snap.pgstat_stat_history AS
+            CREATE TABLE @extschema@.pgstat_snap_stat_history AS
                 SELECT localtimestamp(0) AS snapshot_time, * 
                 FROM pg_stat_statements
                 WHERE 1=2;
-            ALTER TABLE pgstat_snap.pgstat_stat_history ALTER COLUMN snapshot_time SET NOT NULL;
-            ALTER TABLE pgstat_snap.pgstat_stat_history ADD PRIMARY KEY (snapshot_time, queryid, dbid);
-            CREATE INDEX ON pgstat_snap.pgstat_stat_history (snapshot_time);
+            ALTER TABLE @extschema@.pgstat_snap_stat_history ALTER COLUMN snapshot_time SET NOT NULL;
+            ALTER TABLE @extschema@.pgstat_snap_stat_history ADD PRIMARY KEY (snapshot_time, queryid, dbid);
+            CREATE INDEX idx_pgstat_stat_history_snapshot_time ON @extschema@.pgstat_snap_stat_history (snapshot_time);
         ';
     END IF;
 
     -- Create pgstat_snap_diff_all view - this view contains the difference and sum of every query execution
     EXECUTE '
-        CREATE OR REPLACE VIEW pgstat_snap_diff_all AS
+        CREATE OR REPLACE VIEW @extschema@.pgstat_snap_diff_all AS
             SELECT
             snapshot_time,
             queryid,
@@ -94,8 +91,8 @@ BEGIN
                     ELSE FALSE
                 END AS rows_changed
             FROM
-                pgstat_snap.pgstat_stat_history a,
-                pgstat_snap.pgstat_act_history b,
+                @extschema@.pgstat_snap_stat_history a,
+                @extschema@.pgstat_snap_act_history b,
                 pg_database c
             WHERE a.queryid = b.query_id
               AND a.dbid = b.datid
@@ -107,7 +104,7 @@ BEGIN
     
     -- Create pgstat_snap_diff view - this view contains only the difference between every query execution
     EXECUTE '
-        CREATE OR REPLACE VIEW pgstat_snap_diff AS
+        CREATE OR REPLACE VIEW @extschema@.pgstat_snap_diff AS
             SELECT
             snapshot_time,
             queryid,
@@ -145,8 +142,8 @@ BEGIN
                     ELSE FALSE
                 END AS rows_changed
             FROM
-                pgstat_snap.pgstat_stat_history a,
-                pgstat_snap.pgstat_act_history b,
+                @extschema@.pgstat_snap_stat_history a,
+                @extschema@.pgstat_snap_act_history b,
                 pg_database c
             WHERE a.queryid = b.query_id
               AND a.dbid = b.datid
@@ -158,28 +155,35 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-
-CREATE OR REPLACE FUNCTION pgstat_snap.help()
+-- Function to print basic usage
+CREATE OR REPLACE FUNCTION @extschema@.pgstat_snap_help()
 RETURNS void AS $$
 
 BEGIN
     RAISE NOTICE '
 Tables created:
-  pgstat_snap.pgstat_stat_history -> pg_stat_statements history
-  pgstat_snap.pgstat_act_history  -> pg_stat_activity history 
-  pgstat_snap_diff_all            -> view containing the sum and difference of each statement execution
-  pgstat_snap_diff                -> view containing only the difference of each statement execution
+  pgstat_snap_stat_history  -> pg_stat_statements history
+  pgstat_snap_act_history   -> pg_stat_activity history 
+  pgstat_snap_diff_all -> view containing the sum and difference of each statement execution
+  pgstat_snap_diff     -> view containing only the difference of each statement execution
 
 Start gathering snapshots with, e.g. every 1 second 60 times:
-  CALL pgstat_snap.create_snapshot(1, 60);
+  CALL pgstat_snap_collect(1, 60);
   
 Reset all pgstat_snap tables with:
-  SELECT pgstat_snap.reset();   -> reset only pgstat_snap tables
-  SELECT pgstat_snap.reset(1);  -> also select pg_stat_statements_reset()
-  SELECT pgstat_snap.reset(2);  -> also select pg_stat_reset()
+  SELECT pgstat_snap_reset();   -> reset only pgstat_snap tables
+  SELECT pgstat_snap_reset(1);  -> also select pg_stat_statements_reset()
+  SELECT pgstat_snap_reset(2);  -> also select pg_stat_reset()
+
+Basic queries:
+  select * from pgstat_snap_diff order by 1;
+  select * from pgstat_snap_diff order by 2,1;
+  select sum(rows_d),datname from pgstat_snap_diff group by datname;
 
 To completely uninstall pgstat_snap, run:
   DROP EXTENSION pgstat_snap;
+
+Note: search_path must include "@extschema@"
 
 Check full documentation and source code here: https://github.com/raphideb/pgstat_snap
   ';
@@ -187,15 +191,14 @@ Check full documentation and source code here: https://github.com/raphideb/pgsta
 END;
 $$ LANGUAGE plpgsql;
 
-
 -- Function to reset all tables and if 1 or 2 is given, also reset pg_stat_statements and all pg_stats
-CREATE OR REPLACE FUNCTION pgstat_snap.reset(
+CREATE OR REPLACE FUNCTION @extschema@.pgstat_snap_reset(
     full_reset INTEGER DEFAULT NULL
 )
 RETURNS void AS $$
 BEGIN
-    EXECUTE 'TRUNCATE TABLE pgstat_snap.pgstat_stat_history';
-    EXECUTE 'TRUNCATE TABLE pgstat_snap.pgstat_act_history';
+    EXECUTE 'TRUNCATE TABLE @extschema@.pgstat_snap_stat_history';
+    EXECUTE 'TRUNCATE TABLE @extschema@.pgstat_snap_act_history';
 
     IF full_reset IS NOT NULL THEN
         PERFORM pg_stat_statements_reset(); 
@@ -207,7 +210,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Procedure to generate the snapshots
-CREATE OR REPLACE PROCEDURE pgstat_snap.create_snapshot(
+CREATE OR REPLACE PROCEDURE @extschema@.pgstat_snap_collect(
     interval_seconds INTEGER,
     num_iterations INTEGER DEFAULT NULL
 )
@@ -220,14 +223,14 @@ BEGIN
         current_snapshot_time := localtimestamp(0);
         
         -- Create pgsnap_activity snapshot
-        INSERT INTO pgstat_snap.pgstat_act_history 
+        INSERT INTO @extschema@.pgstat_snap_act_history 
         SELECT 
             localtimestamp(0), *
         FROM pg_stat_activity;
         COMMIT;
         
         -- Create pgsnap_statements snapshot
-        INSERT INTO pgstat_snap.pgstat_stat_history
+        INSERT INTO @extschema@.pgstat_snap_stat_history
         SELECT 
             localtimestamp(0), *
         FROM pg_stat_statements

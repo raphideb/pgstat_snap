@@ -1,4 +1,0 @@
-comment = 'Snapshot and analyze pg_stat_* views'
-default_version = '1.0'
-relocatable = true
-requires = 'pg_stat_statements'
