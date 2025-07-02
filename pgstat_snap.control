@@ -1,0 +1,5 @@
+comment = 'create snapshots of pg_stat_statements and activity'
+default_version = '1.0'
+relocatable = false
+requires = 'pg_stat_statements'
+superuser = false
