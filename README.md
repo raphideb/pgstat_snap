@@ -65,12 +65,17 @@ Because everything is timestamped, a reset is usually not needed between CALLs t
 
 Reset all pgstat_snap tables with:
 ```
-  SELECT pgstat_snap_reset();   -> reset only pgstat_snap.pgstat*history tables
-  SELECT pgstat_snap_reset(1);  -> also select pg_stat_statements_reset()
-  SELECT pgstat_snap_reset(2);  -> also select pg_stat_reset()
+SELECT pgstat_snap_reset();   -> reset only pgstat_snap.pgstat*history tables
+SELECT pgstat_snap_reset(1);  -> also select pg_stat_statements_reset()
+SELECT pgstat_snap_reset(2);  -> also select pg_stat_reset()
 ```
-# Uninstall
+## Uninstall
 To completely uninstall pgstat_snap, run:
 ```
 DROP EXTENSION pgstat_snap;
+```
+## Help
+The above is also available as a help function in the extension:
+```
+SELECT pgstat_snap_help();
 ```
